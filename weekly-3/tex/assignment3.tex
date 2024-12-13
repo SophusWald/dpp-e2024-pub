@@ -14,40 +14,47 @@
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{listings}
-
+\lstdefinelanguage{futhark}
+{
+  % list of keywords
+  morekeywords={
+    do,
+    else,
+    for,
+    if,
+    in,
+    include,
+    let,
+    loop,
+    then,
+    type,
+    val,
+    while,
+    with,
+    module,
+    def,
+    entry,
+    local,
+    open,
+    import,
+    assert,
+    match,
+    case,
+  },
+  sensitive=true, % Keywords are case sensitive.
+  morecomment=[l][\color{mGreen}]{--}, % l is for line comment.
+  morestring=[b]" % Strings are enclosed in double quotes.
+}
 \definecolor{mGreen}{rgb}{0,0.6,0}
 \definecolor{mGray}{rgb}{0.5,0.5,0.5}
 \definecolor{mPurple}{rgb}{0.58,0,0.82}
 \definecolor{backgroundColour}{rgb}{0.95,0.95,0.92}
-%TODO:Figure out how to make a nice style
 \lstdefinestyle{mystyle}{
-  language=Python,
-  basicstyle=\ttfamily\footnotesize,
+  language=futhark,
   backgroundcolor=\color[HTML]{F7F7F7},
-  rulecolor=\color[HTML]{EEEEEE},
   identifierstyle=\color[HTML]{24292E},
-  emphstyle=\color[HTML]{005CC5},
   keywordstyle=\color[HTML]{D73A49},
-  commentstyle=\color[HTML]{6A737D},
-  stringstyle=\color[HTML]{032F62},
-  emph={@property,self,range,True,False},
-  morekeywords={super,with,as,lambda},
-  literate=%
-    {+}{{{\color[HTML]{D73A49}+}}}1
-    {-}{{{\color[HTML]{D73A49}-}}}1
-    {*}{{{\color[HTML]{D73A49}*}}}1
-    {/}{{{\color[HTML]{D73A49}/}}}1
-    {=}{{{\color[HTML]{D73A49}=}}}1
-    {/=}{{{\color[HTML]{D73A49}=}}}1,
-  breakatwhitespace=false,
   breaklines=true,
-  captionpos=b,
-  keepspaces=true,
-  numbers=none,
-  showspaces=false,
-  showstringspaces=false,
-  showtabs=false,
-  tabsize=4,
   frame=single,
 }
 % Definition of a style for code, matter of taste
@@ -136,7 +143,19 @@ def optimII1Ker [m][n][q] (Sa: [m]u32, Da: [n]f32)
           )
   in  res
 \end{lstlisting}
-This code passes the validation tests, given in the assignment.
+This code passes the validation tests, given in the assignment. For the
+benchmark we get the following result with the original/classic code.
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{optimize-flat-II1benchmark_results.png}
+\end{figure}
+and the optimized code
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{optimize.png}
+\end{figure}
+We here see that throughout all the benchmarks the code is consistently
+around 2x times faster for the parallel implementation.
 \section*{Task 2: Flattening Rule for Scatter inside Map }
 let dx be the values of xss, and so for di and dv.
 Furthermore let b1x be the offsets for xss (the offset defined with
@@ -153,15 +172,14 @@ in scatter dx new_di vss
 This is very similar to the previous exercise
 let dhist be the values of histos, and so for di and dv.
 Furthermore let b1hist be the offsets for histos, and II1i be segment indices.
-\begin{lstlisting}
+\begin{lstlisting}[escapeinside='']
 -- We first finde the values of the indices in the flattened array,
 -- by adding the offsets of the array they are in.
 let tmp = gather b1hist II1i
 let new_di = map2 (+) tmp di
 -- we now just apply reduce_by_index to the total array.
-in reduce_by_index (o) (0_o) dhist new_di dv
+in reduce_by_index ('\(\odot\)') ('\(0_{\odot}\)') dhist new_di dv
 \end{lstlisting}
-%TODO: Google the notation here
 \section*{Task 4: Implement the lifted version of \textmd{partition2}}
 We have the following implementation of quicksort.
 \begin{lstlisting}
@@ -203,13 +221,14 @@ function.
 The code validates the test given in assignment. I have then added a
 further benchmark with random arrays of sizes increasing by a factor 10,
 from 100 to 10000000, which gives the following results
+%TODO:Make this graph look nicer
 \begin{figure}[htb!]
-  \centering
-  \includegraphics[width=\linewidth]{quicksort-flatbenchmark_results.png}
+	\centering
+	\includegraphics[width=\linewidth]{quicksort-flatbenchmark_results.png}
 \end{figure}
 We see that the sequential implementation looks to be close to \(O(n)\)
 maybe \(O(\log n)\) which matches our expectation.
 On the other hand the parallel opencl implementation, seems from 100 to
 100000 seems to be performing like \(O(\log n)\) as there are only small
-       increases in runtime, matching our expectation
+increases in runtime, matching our expectation
 \end{document}
