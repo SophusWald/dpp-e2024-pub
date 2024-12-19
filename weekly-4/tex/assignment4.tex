@@ -1,0 +1,248 @@
+\documentclass[a4paper,12pt]{article}
+
+\usepackage{a4wide}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{lipsum}
+\usepackage{float}
+\usepackage{graphicx}  % For including images
+
+\usepackage{xcolor}  % For a colorfull presentation
+\usepackage{listings}  % For presenting code 
+
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\lstdefinelanguage{futhark}
+{
+  % list of keywords
+  morekeywords={
+    do,
+    else,
+    for,
+    if,
+    in,
+    include,
+    let,
+    loop,
+    then,
+    type,
+    val,
+    while,
+    with,
+    module,
+    def,
+    entry,
+    local,
+    open,
+    import,
+    assert,
+    match,
+    case,
+  },
+  sensitive=true, % Keywords are case sensitive.
+  morecomment=[l][\color{mGreen}]{--}, % l is for line comment.
+  morestring=[b]" % Strings are enclosed in double quotes.
+}
+\definecolor{mGreen}{rgb}{0,0.6,0}
+\definecolor{mGray}{rgb}{0.5,0.5,0.5}
+\definecolor{mPurple}{rgb}{0.58,0,0.82}
+\definecolor{backgroundColour}{rgb}{0.95,0.95,0.92}
+\lstdefinestyle{mystyle}{
+  language=futhark,
+  backgroundcolor=\color[HTML]{F7F7F7},
+  identifierstyle=\color[HTML]{24292E},
+  keywordstyle=\color[HTML]{D73A49},
+  breaklines=true,
+  frame=single,
+}
+% Definition of a style for code, matter of taste
+\lstset{style=mystyle}
+
+%Custom commands
+%\renewcommand{\thesection}{Task \arabic{section}}
+\newcommand{\ispc}{\textmd{ispc}}
+
+\begin{document}
+\title{Assignment 4}
+\author{Sophus Valentin Willumsgaard hwx333}
+\date{17/12/2024}
+\maketitle
+\section*{Task 1}
+\subsection*{Lifted Min}
+We have the following implementation of lifted min, to one who also gives
+the lowest index.
+\begin{lstlisting}
+def min_lift ((a,b) : (i64,f32)) ((c,d) : (i64,f32)): (i64,f32) =
+       if b < d then (a,b)
+  else if b > d then (c,d)
+                else (i64.min a c,b)
+\end{lstlisting}
+This is  just min on the tuples with reverse lexicographic ordering
+(so it first checks which f32 and then i64 to see which is smallest),
+and so it follows it is associative,
+since min on a ordered set is always
+an associative operator.
+\subsection*{task\_mapomin}
+The rest of the code is given here
+\begin{lstlisting}
+def task_mapomin [n] (as : [n]f32) (y_bar : f32) : (f32, [n]f32) =
+  -- First we find the index that will be increased
+  let bs = map (\a -> let b = a*a - 0.5*a in b) as
+  let (i_max,y) = zip (iota n) bs |> reduce_comm min_lift (n,f32.highest)
+  -- From the Lecture notes we get that bs_bar is then 0 for all except at i_max where it is y_bar.
+  -- Secondly we calculate the adjoint for i_max (We can skip the rest of
+  the map since of the maps since bs_bar is 0 in all those indices.
+  let dev = (2 * as[i_max] - 0.5) * y_bar
+  in (y, scatter (replicate n 0f32) [i_max] [dev])
+\end{lstlisting}
+\subsection*{Validation}
+The code validates
+\subsection*{Benchmark}
+Here are Benchmarks (measured in \(\mu\)s)
+\begin{center}
+	\begin{tabular}{|c|c|c|c|}
+		Test       & mapomin primal & mapomin\_vjp2 & mapomin\_manual \\
+		\hline
+		[10000000] & 72             & 148           & 152             \\
+		\hline
+		[10000000] & 310            & 810           & 838             \\
+	\end{tabular}
+\end{center}
+We see that the two AD implementations perform equally well, and that the AD
+factor is 2-3, which is within expectation.
+\section*{Task 2}
+\subsection*{Code}
+Here is my implementation.
+\begin{lstlisting}
+let vjp2_red_inv =
+  -- primal trace
+  let result_lft = map cfwd as |> reduce_comm (op_lft) ne
+  let result = cbwd result_lft
+  -- reverse trace
+  let f a =
+    let p' = op_inv result_lft a
+    in vjp (\x -> op x p') a rs_bar
+  in (result, map f as)
+\end{lstlisting}
+First the primal trace is run, followed by the reverse trace.
+The advantage of the operator being invertible is,
+that we can calculate the value of the whole expression except one element,
+by taking the whole value and invert it with the single element.
+This makes it so we can do this calculation once, and then do one inverse
+operation for each element in as.
+\subsection*{Validation}
+Code validates
+\subsection*{Benchmark}
+\begin{center}
+	\begin{tabular}{|c|c|c|c|c|}
+		\hline
+		Test     & primal\_sop & vjp2\_sop & vjp2\_sop\_inv & ppad\_sop \\
+		\hline
+		50000000 & 638         & 4187      & 1467           & 7065      \\
+		\hline
+	\end{tabular}
+\end{center}
+\begin{center}
+	\begin{tabular}{|c|c|c|c|c|}
+		\hline
+		Test      & primal\_mul & vjp2\_mul & vjp2\_mul\_inv & ppad\_mul \\
+		\hline
+		50000000  & 295         & 4043      & 908            & 911       \\
+		\hline
+		500000000 & 2714        & 40046     & 8672           & 8672      \\
+		\hline
+	\end{tabular}
+\end{center}
+We see again we have an overhead within x3, which is reasonable.
+We also see that the inverse operation performs better than the non inverse
+implementation by at least a factor 4.
+\section*{Task 3}
+\subsection*{Code}
+Here is my implementation.
+\begin{lstlisting}
+def vjp_redbyind_inv [m] [n] =
+  -- primal trace
+  let hs_lft = map cfwd vs |> hist (op_lft) ne m ks
+  let hs = map cbwd hs_lft
+  let result = map2 (op) dst hs
+
+  -- reverse trace
+  let g d h r_bar = vjp (\x -> op x d) h r_bar
+  let hs_bar = map3 g dst hs rs_bar
+  let dst_bar = map3 g hs dst rs_bar
+
+  let f k v =
+    let p' = op_inv hs_lft[k] v
+    in vjp (\x -> op x p') v hs_bar[k]
+  let vs_bar = map2 f ks vs
+  in (result, dst_bar, vs_bar)
+\end{lstlisting}
+This code has the same advantage as the previous code,
+that the existence of the inverse operation, let us calculate the
+expressions once in hs\_lft, and then just apply one op\_inv for each
+element in vs.
+\subsection*{Validation}
+Code validates
+\subsection*{Benchmark}
+\begin{center}
+	\begin{tabular}{|c|c|c|c|}
+		\hline
+		Test & primal\_sop & vjp2\_sop & vjp2\_sop\_inv \\
+		\hline
+		31   & 256         & 8956      & 516            \\
+		\hline
+		401  & 266         & 12491     & 527            \\
+		\hline
+		50k  & 3461        & 24441     & 3934           \\
+		\hline
+	\end{tabular}
+\end{center}
+\begin{center}
+	\begin{tabular}{|c|c|c|c|}
+		\hline
+		Test & primal\_mul & vjp2\_mul & vjp2\_mul\_inv \\
+		\hline
+		31   & 206         & 595       & 414            \\
+		\hline
+		401  & 210         & 626       & 421            \\
+		\hline
+		50k  & 1147        & 3999      & 1634           \\
+		\hline
+	\end{tabular}
+\end{center}
+In this case we see quite significant speedups for the inverse
+implementation for the sum of product, and also some speedup for
+multiplication.
+\section*{Task 4}
+\subsection*{Cost}
+Here is my implementation of the cost function (it is only parallel in
+points, but could be made to be parallel in centres also).
+\begin{lstlisting}
+let cost [n][k][d] (points: [n][d]f32) (centres: [k][d]f32) : f32 =
+  -- This seems like it could be done flattened,
+  -- but right now I just the lazy option and made a nested function.
+  let dist = map (\x ->
+    reduce_comm f32.min f32.highest
+    (map (\y -> euclid_dist_2 x y) centres )) points
+  in reduce (+) 0 dist
+\end{lstlisting}
+\subsection*{Cost', Cost''}
+we first define the jacobian using vjp, we can then use that function to
+define the hessian.
+\begin{lstlisting}
+let (cost', cost'') =
+  let jacobian clusters = vjp (cost points) x 1
+  let hessian clusters = jvp2 jacobian x (unflatten (replicate (k*d) 1))
+  in hessian cluster_centres
+\end{lstlisting}
+\subsection*{Update of Cluster Centers}
+We now update the cluster functions in parallel
+\begin{lstlisting}
+let new_centres = unflatten (map3 (\x y z -> x - y / z)
+    (flatten cluster_centres) (flatten cost') (flatten cost''))
+\end{lstlisting}
+\subsection*{Validation}
+The code validates.
+\end{document}
